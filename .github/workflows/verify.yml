@@ -1,0 +1,85 @@
+name: Free beta verification
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    if: github.event.repository.private == false
+    runs-on: windows-2025
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: v0.2.0-beta.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Download unpublished packages
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory payload | Out-Null
+          gh release download $env:TAG -D payload -p '*Windows-x64-Setup.exe' -p '*source.zip' -p 'SHA256SUMS.txt'
+          python ci/verify-hashes.py payload
+          Expand-Archive payload/*source.zip -DestinationPath source
+      - name: Install, inspect, convert and uninstall
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $appdir = Join-Path $env:LOCALAPPDATA 'Programs/MorrowBeta'
+          if (Test-Path $appdir) { throw 'Unexpected pre-existing app directory' }
+          $setup = (Get-ChildItem payload/*Setup.exe).FullName
+          $process = Start-Process $setup -ArgumentList '/S' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Installer failed' }
+          $exe = Join-Path $appdir 'Ringfile.exe'
+          if (!(Test-Path $exe)) { throw 'Installed executable missing' }
+          $key = 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall/MorrowBeta'
+          if ((Get-ItemProperty $key).DisplayName -ne '링파일 베타') { throw 'Wrong installed name' }
+          npm install --prefix .ci-tools --no-audit --no-fund playwright@1.64.1
+          node ci/windows-ui.cjs $exe Windows-UI.json
+          $bin = Join-Path $appdir 'resources/bin'
+          & (Join-Path $bin 'node.exe') ci/media-verify.cjs $bin (Join-Path $appdir 'resources/app/engine.cjs') source/Tests/fixtures/video-h264.mp4 Windows-media.json
+          $downloads = Join-Path $env:USERPROFILE Downloads
+          New-Item -ItemType Directory -Force $downloads | Out-Null
+          $sentinel = Join-Path $downloads 'ringfile-install-test-sentinel.txt'
+          'keep' | Set-Content $sentinel
+          $process = Start-Process (Join-Path $appdir Uninstall.exe) -ArgumentList '/S' -Wait -PassThru
+          Start-Sleep -Seconds 3
+          if (Test-Path $exe) { throw 'Uninstall left the app executable' }
+          if (Test-Path $key) { throw 'Uninstall registry entry remains' }
+          if (!(Test-Path $sentinel)) { throw 'Uninstall removed downloaded files' }
+          Remove-Item $sentinel
+          '{"status":"passed","host":"Windows Server 2025 x64 VM","scope":"per-user install, UI, generated media MP3/MP4, cancel, no-overwrite, uninstall; consumer Windows 11 security prompts not tested"}' | Set-Content Windows-install.json
+      - name: Preserve verification without billed artifact storage
+        if: always()
+        shell: pwsh
+        run: |
+          Get-ChildItem Windows-*.json,Windows-UI.png -ErrorAction SilentlyContinue | ForEach-Object { gh release upload $env:TAG $_.FullName --clobber }
+  mac:
+    if: github.event.repository.private == false
+    runs-on: macos-15
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: v0.2.0-beta.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Download unpublished packages
+        run: |
+          mkdir payload
+          gh release download "$TAG" -D payload -p '*macOS-arm64.dmg' -p '*source.zip' -p 'SHA256SUMS.txt'
+          python3 ci/verify-hashes.py payload
+          unzip -q payload/*source.zip -d source
+      - name: Mount, copy, verify signature, launch and exercise tools
+        run: python3 ci/mac-install.py
+      - name: Preserve verification without billed artifact storage
+        if: always()
+        run: |
+          for file in Mac-*.json; do
+            [ -f "$file" ] && gh release upload "$TAG" "$file" --clobber
+          done
