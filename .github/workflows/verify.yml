@@ -6,7 +6,11 @@ permissions:
 jobs:
   windows:
     if: github.event.repository.private == false
-    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     permissions:
       contents: write
@@ -14,6 +18,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       TAG: v0.2.0-beta.1
+      QA_LABEL: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Download unpublished packages
@@ -38,9 +43,9 @@ jobs:
           $key = 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall/MorrowBeta'
           if ((Get-ItemProperty $key).DisplayName -ne '링파일 베타') { throw 'Wrong installed name' }
           npm install --prefix .ci-tools --no-audit --no-fund playwright@1.64.1
-          node ci/windows-ui.cjs $exe Windows-UI.json
+          node ci/windows-ui.cjs $exe "Windows-UI-$env:QA_LABEL.json"
           $bin = Join-Path $appdir 'resources/bin'
-          & (Join-Path $bin 'node.exe') ci/media-verify.cjs $bin (Join-Path $appdir 'resources/app/engine.cjs') source/Tests/fixtures/video-h264.mp4 Windows-media.json
+          & (Join-Path $bin 'node.exe') ci/media-verify.cjs $bin (Join-Path $appdir 'resources/app/engine.cjs') source/Tests/fixtures/video-h264.mp4 "Windows-media-$env:QA_LABEL.json"
           $downloads = Join-Path $env:USERPROFILE Downloads
           New-Item -ItemType Directory -Force $downloads | Out-Null
           $sentinel = Join-Path $downloads 'ringfile-install-test-sentinel.txt'
@@ -51,12 +56,13 @@ jobs:
           if (Test-Path $key) { throw 'Uninstall registry entry remains' }
           if (!(Test-Path $sentinel)) { throw 'Uninstall removed downloaded files' }
           Remove-Item $sentinel
-          '{"status":"passed","host":"Windows Server 2025 x64 VM","scope":"per-user install, UI, generated media MP3/MP4, cancel, no-overwrite, uninstall; consumer Windows 11 security prompts not tested"}' | Set-Content Windows-install.json
+          $os = Get-CimInstance Win32_OperatingSystem
+          @{status='passed';host=$env:QA_LABEL;operatingSystem=$os.Caption;architecture=$os.OSArchitecture;scope='per-user install, UI, generated media MP3/MP4, cancel, no-overwrite, uninstall; browser-origin security prompts not tested'} | ConvertTo-Json | Set-Content "Windows-install-$env:QA_LABEL.json"
       - name: Preserve verification without billed artifact storage
         if: always()
         shell: pwsh
         run: |
-          Get-ChildItem Windows-*.json,Windows-UI.png -ErrorAction SilentlyContinue | ForEach-Object { gh release upload $env:TAG $_.FullName --clobber }
+          Get-ChildItem Windows-*.json,Windows-UI-*.png -ErrorAction SilentlyContinue | ForEach-Object { gh release upload $env:TAG $_.FullName --clobber }
   mac:
     if: github.event.repository.private == false
     runs-on: macos-15
