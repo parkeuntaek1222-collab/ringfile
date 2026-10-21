@@ -6,6 +6,11 @@ on:
         description: Private draft release containing Ringfile-Store-preparation.zip
         required: true
         type: string
+      preparation_asset:
+        description: Preparation ZIP asset in the draft release
+        required: true
+        default: Ringfile-Store-preparation.zip
+        type: string
 permissions:
   contents: read
 jobs:
@@ -19,6 +24,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       STORE_DRAFT: ${{ inputs.draft_release }}
+      STORE_PREPARATION: ${{ inputs.preparation_asset }}
       PYTHONUTF8: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -29,8 +35,9 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           New-Item -ItemType Directory stable,prep | Out-Null
           gh release download v0.2.0 -D stable -p 'Ringfile-0.2.0-Windows-x64.zip'
-          gh release download $env:STORE_DRAFT -D prep -p 'Ringfile-Store-preparation.zip'
-          Expand-Archive prep/Ringfile-Store-preparation.zip -DestinationPath payload
+          if ($env:STORE_PREPARATION -notmatch '^Ringfile-Store-preparation(?:-[0-9]+)?\.zip$') { throw 'Unexpected preparation filename' }
+          gh release download $env:STORE_DRAFT -D prep -p $env:STORE_PREPARATION
+          Expand-Archive (Join-Path prep $env:STORE_PREPARATION) -DestinationPath payload
       - name: Build unsigned submission-format MSIX and test an isolated copy
         shell: pwsh
         run: |
