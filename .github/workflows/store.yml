@@ -33,7 +33,9 @@ jobs:
           Expand-Archive prep/Ringfile-Store-preparation.zip -DestinationPath payload
       - name: Build unsigned submission-format MSIX and test an isolated copy
         shell: pwsh
-        run: ./payload/ci/build-verify.ps1
+        run: |
+          if (Test-Path payload/identity.json) { ./payload/ci/build-verify.ps1 -IdentityFile payload/identity.json }
+          else { ./payload/ci/build-verify.ps1 }
       - name: Preserve unsigned package and honest verification results in draft
         if: always()
         shell: pwsh
