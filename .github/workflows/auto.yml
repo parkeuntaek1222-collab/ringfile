@@ -138,7 +138,7 @@ jobs:
           python3 ci/verify-hashes.py payload
           unzip -q payload/*source.zip -d source
           mkdir baseline
-          gh release download v0.2.1 -D baseline -p '*macOS-arm64.zip' -p 'SHA256SUMS.txt'
+          gh release download v0.2.1 -D baseline -p '*macOS-arm64.dmg' -p 'SHA256SUMS.txt'
           python3 ci/verify-hashes.py baseline
       - name: Mount, copy, verify signature, launch and exercise tools
         run: python3 source/Tests/mac-update-install.py
@@ -146,5 +146,5 @@ jobs:
         if: always()
         run: |
           for file in Mac-*.json Auto-update-*.json; do
-            [ -f "$file" ] && gh release upload "$TAG" "$file" --clobber
+            if [ -f "$file" ]; then gh release upload "$TAG" "$file" --clobber; fi
           done
