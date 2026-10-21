@@ -1,0 +1,41 @@
+name: Free Microsoft Store package validation
+on:
+  workflow_dispatch:
+    inputs:
+      draft_release:
+        description: Private draft release containing Ringfile-Store-preparation.zip
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  msix:
+    if: github.event.repository.private == false
+    runs-on: windows-11-arm
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      STORE_DRAFT: ${{ inputs.draft_release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Download the tested desktop app and Store preparation files
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          New-Item -ItemType Directory stable,prep | Out-Null
+          gh release download v0.2.0 -D stable -p 'Ringfile-0.2.0-Windows-x64.zip'
+          gh release download $env:STORE_DRAFT -D prep -p 'Ringfile-Store-preparation.zip'
+          Expand-Archive prep/Ringfile-Store-preparation.zip -DestinationPath payload
+      - name: Build unsigned submission-format MSIX and test an isolated copy
+        shell: pwsh
+        run: ./payload/ci/build-verify.ps1
+      - name: Preserve unsigned package and honest verification results in draft
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-ChildItem out/*.msix,out/*.json,out/*.xml,out/*.html,out/*.png -ErrorAction SilentlyContinue | ForEach-Object { gh release upload $env:STORE_DRAFT $_.FullName --clobber }
