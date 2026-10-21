@@ -12,6 +12,12 @@ on:
         required: true
         default: 0.2.2
         type: string
+      platforms:
+        description: Platforms to verify
+        type: choice
+        required: true
+        default: all
+        options: [all, mac, windows]
       public_update:
         description: Verify the live public update download after release publication
         type: boolean
@@ -21,7 +27,7 @@ permissions:
   contents: read
 jobs:
   windows:
-    if: github.event.repository.private == false
+    if: github.event.repository.private == false && inputs.platforms != 'mac'
     strategy:
       fail-fast: false
       matrix:
@@ -117,7 +123,7 @@ jobs:
         run: |
           Get-ChildItem Windows-*.json,Windows-UI-*.png,Auto-update-*.json -ErrorAction SilentlyContinue | ForEach-Object { gh release upload $env:TAG $_.FullName --clobber }
   mac:
-    if: github.event.repository.private == false
+    if: github.event.repository.private == false && inputs.platforms != 'windows'
     runs-on: macos-15
     timeout-minutes: 20
     permissions:
