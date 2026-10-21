@@ -1,0 +1,135 @@
+name: Free desktop update verification
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Draft release to verify before publication
+        required: true
+        default: v0.2.1
+        type: string
+      expected_version:
+        description: Version expected in the candidate package
+        required: true
+        default: 0.2.1
+        type: string
+permissions:
+  contents: read
+jobs:
+  windows:
+    if: github.event.repository.private == false
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ inputs.release_tag }}
+      QA_EXPECT_VERSION: ${{ inputs.expected_version }}
+      QA_LABEL: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Download and verify stable candidate and previous stable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          New-Item -ItemType Directory payload,baseline | Out-Null
+          gh release download $env:TAG -D payload -p '*Windows-x64-Setup.exe' -p '*source.zip' -p 'SHA256SUMS.txt'
+          python ci/verify-hashes.py payload
+          Expand-Archive payload/*source.zip -DestinationPath source
+          gh release download v0.2.0 -D baseline -p '*Windows-x64-Setup.exe' -p 'SHA256SUMS.txt'
+          python ci/verify-hashes.py baseline
+      - name: Upgrade stable and verify version, UI, media and user file preservation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $appdir = Join-Path $env:LOCALAPPDATA 'Programs/MorrowBeta'
+          if (Test-Path $appdir) { throw 'Unexpected pre-existing app directory' }
+          $key = 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall/MorrowBeta'
+          $oldSetup = (Get-ChildItem baseline/*Setup.exe).FullName
+          $process = Start-Process $oldSetup -ArgumentList '/S' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Previous installer failed' }
+          if ((Get-ItemProperty $key).DisplayVersion -ne '0.2.0') { throw 'Baseline version mismatch' }
+          $unchangedFiles = @('resources/app/engine.cjs','resources/bin/yt-dlp.exe','resources/bin/ffmpeg.exe','resources/bin/ffprobe.exe','resources/bin/node.exe','resources/bin/morrow-save.exe')
+          $baselineHashes = @{}
+          foreach ($relative in $unchangedFiles) { $baselineHashes[$relative] = (Get-FileHash (Join-Path $appdir $relative)).Hash }
+          $downloads = Join-Path $env:USERPROFILE 'Downloads/링파일 검사'
+          New-Item -ItemType Directory -Force $downloads | Out-Null
+          $sentinel = Join-Path $downloads 'ringfile-install-test-sentinel.txt'
+          'keep' | Set-Content $sentinel
+          $settingsDir = Join-Path $env:APPDATA 'Morrow Beta'
+          New-Item -ItemType Directory -Force $settingsDir | Out-Null
+          @{destination=$downloads} | ConvertTo-Json | Set-Content (Join-Path $settingsDir 'settings.json') -Encoding utf8NoBOM
+          $setup = (Get-ChildItem payload/*Setup.exe).FullName
+          $process = Start-Process $setup -ArgumentList '/S' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Stable installer failed' }
+          $exe = Join-Path $appdir 'Ringfile.exe'
+          if (!(Test-Path $exe)) { throw 'Installed executable missing' }
+          $entry = Get-ItemProperty $key
+          if ($entry.DisplayName -ne '링파일' -or $entry.DisplayVersion -ne $env:QA_EXPECT_VERSION) { throw 'Wrong installed name or version' }
+          $package = Get-Content (Join-Path $appdir 'resources/app/package.json') -Raw | ConvertFrom-Json
+          if ($package.version -ne $env:QA_EXPECT_VERSION) { throw 'Wrong application version' }
+          foreach ($relative in $unchangedFiles) {
+            if ((Get-FileHash (Join-Path $appdir $relative)).Hash -ne $baselineHashes[$relative]) { throw "Tested engine/tool changed: $relative" }
+          }
+          $startMenu = Join-Path $env:APPDATA 'Microsoft/Windows/Start Menu/Programs'
+          if (!(Test-Path (Join-Path $startMenu '링파일.lnk'))) { throw 'Stable shortcut missing' }
+          if (Test-Path (Join-Path $startMenu '링파일 베타.lnk')) { throw 'Obsolete beta shortcut remains' }
+          npm install --prefix .ci-tools --no-audit --no-fund playwright@1.64.1
+          $env:QA_EXPECT_DESTINATION = $downloads
+          node source/Tests/windows-update-ui.cjs $exe "Windows-UI-$env:QA_LABEL.json"
+          $bin = Join-Path $appdir 'resources/bin'
+          & (Join-Path $bin 'node.exe') --test source/Tests/updates.test.cjs
+          foreach ($relative in @('engine.cjs','updates.cjs','preload.cjs','main.cjs')) {
+            if ((Get-FileHash (Join-Path $appdir "resources/app/$relative")).Hash -ne (Get-FileHash "source/Windows/$relative").Hash) { throw "Packaged source mismatch: $relative" }
+          }
+          & (Join-Path $bin 'node.exe') ci/media-verify.cjs $bin (Join-Path $appdir 'resources/app/engine.cjs') source/Tests/fixtures/video-h264.mp4 "Windows-media-$env:QA_LABEL.json"
+          $process = Start-Process (Join-Path $appdir Uninstall.exe) -ArgumentList '/S' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Uninstaller failed' }
+          Start-Sleep -Seconds 3
+          if (Test-Path $exe) { throw 'Uninstall left the app executable' }
+          if (Test-Path $key) { throw 'Uninstall registry entry remains' }
+          if (!(Test-Path $sentinel)) { throw 'Uninstall removed downloaded files' }
+          $saved = Get-Content (Join-Path $settingsDir 'settings.json') -Raw | ConvertFrom-Json
+          if ($saved.destination -ne $downloads) { throw 'Saved destination lost' }
+          $os = Get-CimInstance Win32_OperatingSystem
+          @{status='passed';version=$env:QA_EXPECT_VERSION;host=$env:QA_LABEL;operatingSystem=$os.Caption;architecture=$os.OSArchitecture;previousStableEngineAndToolsUnchanged=$true;scope='stable upgrade, version and shortcut migration, preserved save destination, packaged UI, generated MP3/MP4 and full decode, cancel, no-overwrite, uninstall with downloads/settings preserved; real YouTube is separately user-reported; browser-origin security prompts not automated'} | ConvertTo-Json | Set-Content "Windows-install-$env:QA_LABEL.json"
+      - name: Preserve verification without Actions artifact storage
+        if: always()
+        shell: pwsh
+        run: |
+          Get-ChildItem Windows-*.json,Windows-UI-*.png -ErrorAction SilentlyContinue | ForEach-Object { gh release upload $env:TAG $_.FullName --clobber }
+  mac:
+    if: github.event.repository.private == false
+    runs-on: macos-15
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ inputs.release_tag }}
+      QA_EXPECT_VERSION: ${{ inputs.expected_version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Download and verify stable candidate
+        run: |
+          set -e
+          mkdir payload
+          gh release download "$TAG" -D payload -p '*macOS-arm64.dmg' -p '*source.zip' -p 'SHA256SUMS.txt'
+          python3 ci/verify-hashes.py payload
+          unzip -q payload/*source.zip -d source
+      - name: Mount, copy, verify signature, launch and exercise tools
+        run: python3 source/Tests/mac-update-install.py
+      - name: Preserve verification without Actions artifact storage
+        if: always()
+        run: |
+          for file in Mac-*.json; do
+            [ -f "$file" ] && gh release upload "$TAG" "$file" --clobber
+          done
