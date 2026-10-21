@@ -1,0 +1,68 @@
+name: Windows live release gate
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release to verify
+        required: true
+        default: v0.2.0-beta.1
+        type: string
+permissions:
+  contents: read
+jobs:
+  windows-live:
+    if: github.event.repository.private == false
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 12
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ inputs.release_tag }}
+      QA_LABEL: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Download and verify exact release installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          New-Item -ItemType Directory payload | Out-Null
+          gh release download $env:TAG -D payload -p '*Windows-x64-Setup.exe' -p 'SHA256SUMS.txt'
+          python ci/verify-hashes.py payload
+      - name: Install actual release without changing security settings
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $appdir = Join-Path $env:LOCALAPPDATA 'Programs/MorrowBeta'
+          if (Test-Path $appdir) { throw 'Unexpected existing app directory' }
+          $setup = (Get-ChildItem payload/*Setup.exe).FullName
+          $process = Start-Process $setup -ArgumentList '/S' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Installer failed' }
+          if (!(Test-Path (Join-Path $appdir 'Ringfile.exe'))) { throw 'App missing' }
+      - name: Download real YouTube MP3 and MP4 and decode entire files
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $appdir = Join-Path $env:LOCALAPPDATA 'Programs/MorrowBeta'
+          & (Join-Path $appdir 'resources/bin/node.exe') ci/windows-live.cjs $appdir "Windows-live-2026-10-21-$env:QA_LABEL.json"
+      - name: Remove test installation
+        if: always()
+        shell: pwsh
+        run: |
+          $appdir = Join-Path $env:LOCALAPPDATA 'Programs/MorrowBeta'
+          if (Test-Path (Join-Path $appdir 'Uninstall.exe')) {
+            $process = Start-Process (Join-Path $appdir 'Uninstall.exe') -ArgumentList '/S' -Wait -PassThru
+            if ($process.ExitCode -ne 0) { throw 'Uninstall failed' }
+          }
+      - name: Preserve report in release without Actions artifact storage
+        if: always()
+        shell: pwsh
+        run: |
+          Get-ChildItem Windows-live-*.json -ErrorAction SilentlyContinue | ForEach-Object { gh release upload $env:TAG $_.FullName --clobber }
