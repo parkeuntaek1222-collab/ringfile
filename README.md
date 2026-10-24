@@ -2,7 +2,7 @@
 
 YouTube 공개 영상 링크를 MP3 또는 MP4로 저장하는 무료 데스크톱 앱입니다. 변환 도구가 포함되어 있으며 가입·결제·광고·운영자 변환 서버 없이 사용합니다.
 
-[Mac·Windows 최신 버전 다운로드](https://github.com/parkeuntaek1222-collab/ringfile/releases/latest) · [웹사이트](https://ringfile.pages.dev/#desktop) · [오류 제보](https://github.com/parkeuntaek1222-collab/ringfile/issues)
+[Mac·Windows 최신 버전 다운로드](https://github.com/parkeuntaek1222-collab/ringfile/releases/latest) · [링파일 공식 사이트](https://ringfile.pages.dev/) · [사용 안내](https://ringfile.pages.dev/guide) · [앱 설치 안내](https://ringfile.pages.dev/download) · [오류 제보](https://github.com/parkeuntaek1222-collab/ringfile/issues)
 
 - Mac: Apple Silicon · macOS 13.5 이상
 - Windows: Windows 11 x64 대상, 현재 사용자 설치 및 무설치 ZIP 제공
@@ -22,4 +22,3 @@ YouTube 공개 영상 링크를 MP3 또는 MP4로 저장하는 무료 데스크�
 이 저장소는 배포·검증 채널입니다. 릴리스의 source ZIP에는 앱 코드·테스트·미디어 도구 소스·빌드 자료가, third-party-sources ZIP에는 공급처 소스·버전·체크섬·재빌드 안내가 있습니다. 라이선스 고지는 패키지에도 포함됩니다.
 
 CI는 수동 실행이며 공개 저장소의 표준 무료 Windows/macOS 실행 환경만 사용합니다. Actions 유료 아티팩트 저장소·유료 실행 환경·유료 서버·결제 설정을 추가하지 않았으며, 검사 통과 후 설치 파일을 공개합니다.
-
