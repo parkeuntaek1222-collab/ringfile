@@ -68,7 +68,7 @@ jobs:
           $process = Start-Process $oldSetup -ArgumentList '/S' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw 'Previous installer failed' }
           if ((Get-ItemProperty $key).DisplayVersion -ne '0.2.1') { throw 'Baseline version mismatch' }
-          $unchangedFiles = @('resources/app/engine.cjs','resources/bin/yt-dlp.exe','resources/bin/ffmpeg.exe','resources/bin/ffprobe.exe','resources/bin/node.exe','resources/bin/morrow-save.exe')
+          $unchangedFiles = @('resources/bin/yt-dlp.exe','resources/bin/ffmpeg.exe','resources/bin/ffprobe.exe','resources/bin/node.exe','resources/bin/morrow-save.exe')
           $baselineHashes = @{}
           foreach ($relative in $unchangedFiles) { $baselineHashes[$relative] = (Get-FileHash (Join-Path $appdir $relative)).Hash }
           $downloads = Join-Path $env:USERPROFILE 'Downloads/링파일 검사'
@@ -99,7 +99,7 @@ jobs:
           node source/Tests/windows-update-ui.cjs $exe "Windows-UI-$env:QA_LABEL.json"
           $bin = Join-Path $appdir 'resources/bin'
           & (Join-Path $bin 'node.exe') --test source/Tests/updates.test.cjs source/Tests/auto-update.test.cjs source/Tests/usage.test.cjs
-          foreach ($relative in @('engine.cjs','updates.cjs','auto-update.cjs','preload.cjs','main.cjs','usage.cjs')) {
+          foreach ($relative in @('engine.cjs','updates.cjs','auto-update.cjs','preload.cjs','main.cjs','usage.cjs','youtube-connection.cjs')) {
             if ((Get-FileHash (Join-Path $appdir "resources/app/$relative")).Hash -ne (Get-FileHash "source/Windows/$relative").Hash) { throw "Packaged source mismatch: $relative" }
           }
           & (Join-Path $bin 'node.exe') ci/media-verify.cjs $bin (Join-Path $appdir 'resources/app/engine.cjs') source/Tests/fixtures/video-h264.mp4 "Windows-media-$env:QA_LABEL.json"
@@ -118,7 +118,7 @@ jobs:
           $saved = Get-Content (Join-Path $settingsDir 'settings.json') -Raw | ConvertFrom-Json
           if ($saved.destination -ne $downloads) { throw 'Saved destination lost' }
           $os = Get-CimInstance Win32_OperatingSystem
-          @{status='passed';version=$env:QA_EXPECT_VERSION;host=$env:QA_LABEL;operatingSystem=$os.Caption;architecture=$os.OSArchitecture;previousStableEngineAndToolsUnchanged=$true;scope='stable upgrade, version and shortcut migration, preserved save destination, packaged UI, generated MP3/MP4 and full decode, cancel, no-overwrite, uninstall with downloads/settings preserved; real YouTube is separately user-reported; browser-origin security prompts not automated'} | ConvertTo-Json | Set-Content "Windows-install-$env:QA_LABEL.json"
+          @{status='passed';version=$env:QA_EXPECT_VERSION;host=$env:QA_LABEL;operatingSystem=$os.Caption;architecture=$os.OSArchitecture;previousStableMediaToolsUnchanged=$true;scope='stable upgrade, version and shortcut migration, preserved save destination, packaged UI and synthetic account reuse, generated MP3/MP4 and full decode, cancel, no-overwrite, uninstall with downloads/settings preserved; real YouTube is separately user-reported; browser-origin security prompts not automated'} | ConvertTo-Json | Set-Content "Windows-install-$env:QA_LABEL.json"
       - name: Preserve verification without Actions artifact storage
         if: always()
         shell: pwsh
